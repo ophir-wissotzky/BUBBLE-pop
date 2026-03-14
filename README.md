@@ -1,4 +1,4 @@
-# [CLICK HERE TO PLAY POP SNIPER OP!](https://ophir-wissotzky.github.io/BUBBLE-pop/)
+# [CLICK HERE TO PLAY BUBBLE POP!](https://ophir-wissotzky.github.io/BUBBLE-pop/)
 
 ## About the Game
 Pop Sniper Op is a fun bubble shooting game made by Ophir. 

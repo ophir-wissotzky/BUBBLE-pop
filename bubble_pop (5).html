@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Bubble Pop</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: #020810;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #wrapper {
+            position: relative;
+            /* Natural size — JS will scale it via transform */
+            width: 440px;
+            height: 660px;
+            transform-origin: center center;
+            flex-shrink: 0;
+        }
+
+        /* Both screens sit on top of each other inside wrapper */
+        #startScreen, #gameCanvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 440px;
+            height: 660px;
+        }
+
+        #startScreen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: 90px;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        #startCanvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 440px;
+            height: 660px;
+            border-radius: 20px;
+        }
+
+        .start-content {
+            position: relative;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .game-title {
+            font-size: 54px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            font-family: 'Arial Black', Arial, sans-serif;
+            background: linear-gradient(180deg, #ffffff 0%, #7be8ff 45%, #2299ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            filter: drop-shadow(0 0 18px rgba(0,180,255,0.8));
+            margin-bottom: 38px;
+        }
+
+        #startBtn {
+            padding: 15px 58px;
+            font-size: 21px;
+            font-family: 'Arial Black', Arial, sans-serif;
+            font-weight: 900;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+            color: white;
+            background: linear-gradient(135deg, #0066ee, #00c8ff, #0044bb);
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 0 35px rgba(0,160,255,0.75), 0 0 70px rgba(0,100,255,0.35),
+                        inset 0 1px 0 rgba(255,255,255,0.28);
+            transition: transform 0.12s, box-shadow 0.12s;
+            text-shadow: 0 2px 6px rgba(0,0,80,0.6);
+        }
+        #startBtn:hover  { transform: scale(1.08) translateY(-3px); }
+        #startBtn:active { transform: scale(0.96); }
+
+        .hint-text {
+            margin-top: 16px;
+            font-size: 11px;
+            color: rgba(120,190,255,0.45);
+            letter-spacing: 2px;
+            font-family: Arial, sans-serif;
+        }
+
+        #gameCanvas {
+            display: none;
+            border-radius: 10px;
+            border: 3px solid rgba(80,160,255,0.25);
+            box-shadow: 0 0 60px rgba(0,100,255,0.25);
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body>
+
+<div id="wrapper">
+    <div id="startScreen">
+        <canvas id="startCanvas" width="440" height="660"></canvas>
+        <div class="start-content">
+            <div class="game-title">BUBBLE POP</div>
+            <button id="startBtn" onclick="startGame()">&#9654;&nbsp; PLAY</button>
+            <div class="hint-text">Match 3 or more &bull; Beat the clock</div>
+        </div>
+    </div>
+    <canvas id="gameCanvas" width="440" height="660"></canvas>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  RESPONSIVE SCALING
+//  Keeps the 440×660 game fitting perfectly in
+//  any window/screen without distortion.
+// ═══════════════════════════════════════════════
+var GAME_W = 440, GAME_H = 660;
+
+function scaleGame() {
+    var wrapper = document.getElementById('wrapper');
+    var winW = window.innerWidth;
+    var winH = window.innerHeight;
+    var scale = Math.min(winW / GAME_W, winH / GAME_H);
+    // Never scale above 1 on desktop so it stays crisp
+    // On mobile it will scale UP to fill the screen
+    wrapper.style.transform = 'scale(' + scale + ')';
+}
+
+scaleGame();
+window.addEventListener('resize', scaleGame);
+window.addEventListener('orientationchange', function() {
+    setTimeout(scaleGame, 300);
+});
+
+// ═══════════════════════════════════════════════
+//  AUDIO
+// ═══════════════════════════════════════════════
+var audioCtx = null;
+function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+
+function playBlup(pitch) {
+    pitch = pitch || 1.0;
+    var ac = getAudioCtx();
+    ac.resume().then(function() {
+        var osc = ac.createOscillator();
+        var gain = ac.createGain();
+        var lp = ac.createBiquadFilter();
+
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(520 * pitch, ac.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80 * pitch, ac.currentTime + 0.18);
+
+        gain.gain.setValueAtTime(0.001, ac.currentTime);
+        gain.gain.linearRampToValueAtTime(0.6, ac.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.22);
+
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(900, ac.currentTime);
+        lp.frequency.exponentialRampToValueAtTime(200, ac.currentTime + 0.18);
+
+        osc.connect(lp); lp.connect(gain); gain.connect(ac.destination);
+        osc.start(ac.currentTime); osc.stop(ac.currentTime + 0.25);
+    });
+}
+
+// ═══════════════════════════════════════════════
+//  START SCREEN ANIMATION
+// ═══════════════════════════════════════════════
+var sc = document.getElementById("startCanvas");
+var sCtx = sc.getContext("2d");
+var SW = sc.width, SH = sc.height;
+var BUBBLE_COLORS = ["#FF3E3E","#34FF5B","#3E90FF","#FFEB3B","#F032E6","#00FFFF"];
+
+var decos = [];
+for (var i = 0; i < 52; i++) {
+    decos.push({
+        x: Math.random() * SW, y: Math.random() * SH * 0.72,
+        r: 9 + Math.random() * 24,
+        color: BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)],
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: -(0.12 + Math.random() * 0.32),
+        wobble: Math.random() * Math.PI * 2,
+        ws: 0.008 + Math.random() * 0.018,
+        alpha: 0.45 + Math.random() * 0.55
+    });
+}
+
+function drawStartBG() {
+    var bg = sCtx.createLinearGradient(0, 0, 0, SH);
+    bg.addColorStop(0, "#010612");
+    bg.addColorStop(0.5, "#031028");
+    bg.addColorStop(1, "#041838");
+    sCtx.fillStyle = bg;
+    sCtx.fillRect(0, 0, SW, SH);
+}
+
+function drawDecoBubble(b) {
+    sCtx.globalAlpha = b.alpha;
+    sCtx.beginPath();
+    sCtx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    var g = sCtx.createRadialGradient(b.x-b.r*.3, b.y-b.r*.3, b.r*.05, b.x, b.y, b.r);
+    g.addColorStop(0, "rgba(255,255,255,0.92)");
+    g.addColorStop(0.28, b.color);
+    g.addColorStop(1, "rgba(0,0,0,0.55)");
+    sCtx.fillStyle = g;
+    sCtx.fill();
+    sCtx.beginPath();
+    sCtx.arc(b.x-b.r*.28, b.y-b.r*.3, b.r*.21, 0, Math.PI*2);
+    sCtx.fillStyle = "rgba(255,255,255,0.42)";
+    sCtx.fill();
+    sCtx.globalAlpha = 1;
+}
+
+function tickStart() {
+    if (document.getElementById("startScreen").style.display === "none") return;
+    drawStartBG();
+    decos.forEach(function(b) {
+        b.wobble += b.ws;
+        b.x += b.vx + Math.sin(b.wobble) * 0.28;
+        b.y += b.vy;
+        if (b.y + b.r < 0)    { b.y = SH * 0.72 + b.r; b.x = Math.random() * SW; }
+        if (b.x < -b.r)         b.x = SW + b.r;
+        if (b.x > SW + b.r)     b.x = -b.r;
+        drawDecoBubble(b);
+    });
+    var fade = sCtx.createLinearGradient(0, SH-340, 0, SH);
+    fade.addColorStop(0, "rgba(3,14,38,0)");
+    fade.addColorStop(1, "rgba(3,14,38,0.98)");
+    sCtx.fillStyle = fade;
+    sCtx.fillRect(0, SH-340, SW, 340);
+    requestAnimationFrame(tickStart);
+}
+tickStart();
+
+// ═══════════════════════════════════════════════
+//  GAME ENGINE
+// ═══════════════════════════════════════════════
+var canvas = document.getElementById("gameCanvas");
+var ctx = canvas.getContext("2d");
+
+var RADIUS = 20, COLUMNS = 11, ROWS = 16, ROW_HEIGHT = 34;
+var COLORS = ["#FF3E3E","#34FF5B","#3E90FF","#FFEB3B","#F032E6","#00FFFF"];
+var SHOOTER_X = 220, SHOOTER_Y = 625;
+
+var score, grid, particles, bullet, currentAmmoColor, gameState, mousePos, dropTimer, lastTime, rowOffset, gameTimer;
+var FREEZE_TIME = 100; // seconds until rows stop dropping
+var activeColors; // colors still in play this session
+
+function startGame() {
+    document.getElementById("startScreen").style.display = "none";
+    canvas.style.display = "block";
+    getAudioCtx().resume();
+    initGame();
+    requestAnimationFrame(gameLoop);
+}
+
+function initGame() {
+    score = 0; dropTimer = 20; gameState = "PLAYING";
+    particles = []; bullet = null; rowOffset = 0; gameTimer = 0;
+    mousePos = { x: SHOOTER_X, y: 200 };
+    // All colors back at the start of every new game
+    activeColors = COLORS.slice();
+    currentAmmoColor = randColor();
+    grid = [];
+    for (var r = 0; r < ROWS; r++) {
+        grid.push([]);
+        for (var c = 0; c < COLUMNS; c++) grid[r].push(null);
+    }
+    for (var r = 0; r < 5; r++)
+        for (var c = 0; c < COLUMNS; c++) {
+            if (isOdd(r) && c === COLUMNS-1) continue;
+            grid[r][c] = randColor();
+        }
+    lastTime = performance.now();
+}
+
+// Pick a random color from only the active (not-yet-cleared) colors
+function randColor() {
+    return activeColors[Math.floor(Math.random() * activeColors.length)];
+}
+
+// Check if a color has been fully cleared by the player and retire it
+function checkColorCleared(clearedByPlayer) {
+    // clearedByPlayer is the Set of colors the player just popped (not floating drops)
+    clearedByPlayer.forEach(function(color) {
+        // Is this color completely gone from the grid?
+        var stillExists = false;
+        for (var r = 0; r < ROWS && !stillExists; r++)
+            for (var c = 0; c < COLUMNS && !stillExists; c++)
+                if (grid[r][c] === color) stillExists = true;
+        // Also still exists if it's the current ammo or in-flight bullet
+        if (currentAmmoColor === color) stillExists = true;
+        if (bullet && bullet.color === color) stillExists = true;
+
+        if (!stillExists) {
+            // Remove from activeColors so it never spawns again this game
+            activeColors = activeColors.filter(function(col) { return col !== color; });
+            // If activeColors somehow becomes empty, restore all (safety net)
+            if (activeColors.length === 0) activeColors = COLORS.slice();
+        }
+    });
+}
+
+function isOdd(r) { return (r + rowOffset) % 2 === 1; }
+
+function coords(r, c) {
+    return {
+        x: c*(RADIUS*2) + RADIUS + (isOdd(r) ? RADIUS : 0),
+        y: r*ROW_HEIGHT + RADIUS + 45
+    };
+}
+
+function gridPos(x, y) {
+    var r = Math.round((y - RADIUS - 45) / ROW_HEIGHT);
+    var c = Math.round((x - RADIUS - (isOdd(r) ? RADIUS : 0)) / (RADIUS*2));
+    return { r:r, c:c };
+}
+
+function newRow(idx) {
+    var row = [];
+    for (var c = 0; c < COLUMNS; c++)
+        row.push((isOdd(idx) && c === COLUMNS-1) ? null : randColor());
+    return row;
+}
+
+function addRow() {
+    for (var r = ROWS-1; r > 0; r--) grid[r] = grid[r-1].slice();
+    rowOffset = (rowOffset+1) % 2;
+    grid[0] = newRow(0);
+    for (var r = 0; r < ROWS; r++) if (isOdd(r)) grid[r][COLUMNS-1] = null;
+    checkOver();
+}
+
+function checkOver() {
+    for (var r = 0; r < ROWS; r++)
+        for (var c = 0; c < COLUMNS; c++)
+            if (grid[r][c] && r >= ROWS-2) { gameState = "GAMEOVER"; return; }
+}
+
+// ── Get canvas coordinates from mouse OR touch event ──
+// Divides by the CSS scale so the coords map correctly
+// onto the internal 440×660 canvas space.
+function getCanvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var src = (e.touches && e.touches.length) ? e.touches[0] : e;
+    // rect.width is the SCALED size; canvas.width is 440
+    var scaleX = canvas.width  / rect.width;
+    var scaleY = canvas.height / rect.height;
+    return {
+        x: (src.clientX - rect.left) * scaleX,
+        y: (src.clientY - rect.top)  * scaleY
+    };
+}
+
+function fireBullet(pos) {
+    if (!pos) return;
+    if (gameState !== "PLAYING") { initGame(); return; }
+    if (bullet) return;
+    // Don't allow shooting straight down or sideways below shooter
+    if (pos.y >= SHOOTER_Y - 20) return;
+    var ang = Math.atan2(pos.y - SHOOTER_Y, pos.x - SHOOTER_X);
+    bullet = {
+        x: SHOOTER_X, y: SHOOTER_Y,
+        dx: Math.cos(ang)*15, dy: Math.sin(ang)*15,
+        color: currentAmmoColor
+    };
+    currentAmmoColor = randColor();
+}
+
+// Mouse
+canvas.addEventListener("mousemove", function(e) { mousePos = getCanvasPos(e); });
+canvas.addEventListener("mousedown",  function(e) { mousePos = getCanvasPos(e); fireBullet(mousePos); });
+
+// Touch
+canvas.addEventListener("touchmove", function(e) {
+    e.preventDefault();
+    mousePos = getCanvasPos(e);
+}, { passive: false });
+
+canvas.addEventListener("touchstart", function(e) {
+    e.preventDefault();
+    mousePos = getCanvasPos(e);
+    fireBullet(mousePos);
+}, { passive: false });
+
+function explode(x, y, color) {
+    playBlup(0.82 + Math.random()*0.42);
+    for (var i = 0; i < 8; i++)
+        particles.push({ x:x, y:y, dx:(Math.random()-.5)*10, dy:(Math.random()-.5)*10, life:1, color:color });
+}
+
+function neighbors(r, c) {
+    var dirs = !isOdd(r)
+        ? [[-1,0],[-1,-1],[0,-1],[0,1],[1,0],[1,-1]]
+        : [[-1,0],[-1,1], [0,-1],[0,1],[1,0],[1,1]];
+    return dirs.map(function(d) { return { r:r+d[0], c:c+d[1] }; })
+               .filter(function(n) { return n.r>=0 && n.r<ROWS && n.c>=0 && n.c<COLUMNS; });
+}
+
+function flood(r, c, color, set) {
+    if (!set) set = new Set();
+    var k = r+","+c;
+    if (set.has(k) || grid[r][c] !== color) return set;
+    set.add(k);
+    neighbors(r, c).forEach(function(n) { flood(n.r, n.c, color, set); });
+    return set;
+}
+
+function dropFloating() {
+    var conn = new Set();
+    function walk(r, c) {
+        var k = r+","+c;
+        if (conn.has(k) || !grid[r][c]) return;
+        conn.add(k);
+        neighbors(r, c).forEach(function(n) { walk(n.r, n.c); });
+    }
+    for (var c = 0; c < COLUMNS; c++) if (grid[0][c]) walk(0, c);
+    for (var r = 0; r < ROWS; r++)
+        for (var c = 0; c < COLUMNS; c++)
+            if (grid[r][c] && !conn.has(r+","+c)) {
+                var p = coords(r, c);
+                explode(p.x, p.y, grid[r][c]);
+                grid[r][c] = null;
+                score += 20;
+            }
+}
+
+function update() {
+    if (gameState !== "PLAYING") return;
+    var now = performance.now(), dt = (now - lastTime) / 1000;
+    lastTime = now;
+    gameTimer += dt;
+    var frozen = gameTimer >= FREEZE_TIME;
+    if (!frozen) {
+        dropTimer -= dt;
+        if (dropTimer <= 0) { addRow(); dropTimer = 20; }
+    }
+
+    for (var i = particles.length-1; i >= 0; i--) {
+        particles[i].x += particles[i].dx;
+        particles[i].y += particles[i].dy;
+        particles[i].life -= 0.03;
+        if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    if (bullet) {
+        bullet.x += bullet.dx;
+        bullet.y += bullet.dy;
+        if (bullet.x < RADIUS || bullet.x > canvas.width - RADIUS) bullet.dx *= -1;
+        if (bullet.y > canvas.height + 40) { bullet = null; return; }
+
+        var hit = bullet.y <= RADIUS + 45;
+        if (!hit) {
+            outer:
+            for (var r = 0; r < ROWS; r++)
+                for (var c = 0; c < COLUMNS; c++)
+                    if (grid[r][c]) {
+                        var p = coords(r, c);
+                        if (Math.hypot(bullet.x-p.x, bullet.y-p.y) < RADIUS*1.5) { hit=true; break outer; }
+                    }
+        }
+
+        if (hit) {
+            var gp = gridPos(bullet.x, bullet.y);
+            var tR = Math.max(0, Math.min(ROWS-1, gp.r));
+            var tC = Math.max(0, Math.min(COLUMNS-1, gp.c));
+            if (grid[tR][tC]) {
+                var best = { r:tR, c:tC, d:Infinity };
+                for (var nr = 0; nr < ROWS; nr++)
+                    for (var nc = 0; nc < COLUMNS; nc++) {
+                        if (grid[nr][nc] || (isOdd(nr) && nc===COLUMNS-1)) continue;
+                        var pp = coords(nr, nc), d = Math.hypot(bullet.x-pp.x, bullet.y-pp.y);
+                        if (d < best.d) best = { r:nr, c:nc, d:d };
+                    }
+                tR = best.r; tC = best.c;
+            }
+            if (isOdd(tR) && tC === COLUMNS-1) tC--;
+            grid[tR][tC] = bullet.color;
+            var matches = flood(tR, tC, bullet.color);
+            if (matches.size >= 3) {
+                // Track which colors the player is clearing right now
+                var playerClearedColors = new Set();
+                matches.forEach(function(m) {
+                    var parts = m.split(','), mr = parseInt(parts[0]), mc = parseInt(parts[1]);
+                    var pp = coords(mr, mc);
+                    playerClearedColors.add(grid[mr][mc]);
+                    explode(pp.x, pp.y, grid[mr][mc]);
+                    grid[mr][mc] = null;
+                    score += 10;
+                });
+                dropFloating();
+                // Only retire colors that the player directly popped (not floating drops)
+                checkColorCleared(playerClearedColors);
+            }
+            bullet = null;
+            checkOver();
+        }
+    }
+}
+
+function drawBubble(x, y, color, r) {
+    r = r || RADIUS;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    var g = ctx.createRadialGradient(x-r/3, y-r/3, r/10, x, y, r);
+    g.addColorStop(0, "#fff");
+    g.addColorStop(0.3, color);
+    g.addColorStop(1, "#000");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x-r*.28, y-r*.3, r*.19, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.33)";
+    ctx.fill();
+}
+
+function draw() {
+    var bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, "#04111e");
+    bg.addColorStop(1, "#000810");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "rgba(255,62,62,0.4)";
+    ctx.setLineDash([8,8]);
+    ctx.beginPath();
+    ctx.moveTo(0, (ROWS-2)*ROW_HEIGHT+45);
+    ctx.lineTo(canvas.width, (ROWS-2)*ROW_HEIGHT+45);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (var r = 0; r < ROWS; r++)
+        for (var c = 0; c < COLUMNS; c++)
+            if (grid[r][c]) { var p = coords(r,c); drawBubble(p.x, p.y, grid[r][c]); }
+
+    particles.forEach(function(p) {
+        ctx.globalAlpha = p.life;
+        drawBubble(p.x, p.y, p.color, RADIUS/3);
+        ctx.globalAlpha = 1;
+    });
+
+    if (gameState === "PLAYING") {
+        var mx = mousePos ? mousePos.x : SHOOTER_X;
+        var my = mousePos ? mousePos.y : 200;
+        if (!bullet) {
+            var ang = Math.atan2(my - SHOOTER_Y, mx - SHOOTER_X);
+            ctx.beginPath();
+            ctx.setLineDash([5,5]);
+            ctx.moveTo(SHOOTER_X, SHOOTER_Y);
+            ctx.lineTo(SHOOTER_X + Math.cos(ang)*88, SHOOTER_Y + Math.sin(ang)*88);
+            ctx.strokeStyle = "rgba(255,255,255,0.22)";
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        drawBubble(SHOOTER_X, SHOOTER_Y, currentAmmoColor);
+        if (bullet) drawBubble(bullet.x, bullet.y, bullet.color);
+    }
+
+    // Header bar
+    ctx.fillStyle = "rgba(0,4,16,0.88)";
+    ctx.fillRect(0, 0, canvas.width, 42);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 16px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText("SCORE: " + score, 16, 27);
+
+    var frozen = gameTimer >= FREEZE_TIME;
+    ctx.fillStyle = dropTimer <= 5 ? "#FF3E3E" : "#FFEB3B";
+    ctx.textAlign = "right";
+    if (!frozen) {
+        ctx.fillText("DROP IN: " + Math.ceil(dropTimer) + "s", canvas.width-12, 27);
+    }
+
+    if (gameState !== "PLAYING") {
+        ctx.fillStyle = "rgba(0,0,0,0.88)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.textAlign = "center";
+        ctx.shadowColor = "#ff2020";
+        ctx.shadowBlur = 28;
+        ctx.fillStyle = "#FF3E3E";
+        ctx.font = "bold 52px Arial Black";
+        ctx.fillText("GAME OVER", canvas.width/2, 288);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "white";
+        ctx.font = "22px Arial";
+        ctx.fillText("FINAL SCORE: " + score, canvas.width/2, 348);
+        ctx.fillStyle = "rgba(140,200,255,0.65)";
+        ctx.font = "14px Arial";
+        ctx.fillText("CLICK / TAP TO PLAY AGAIN", canvas.width/2, 418);
+    }
+}
+
+function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+</script>
+</body>
+</html>
